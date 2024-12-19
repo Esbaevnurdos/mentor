@@ -10,7 +10,7 @@ import (
 )
 
 func ConnectDB() *mongo.Client {
-	const uri = "mongodb://localhost:27017"
+	const uri = "mongodb+srv://zhansayatazhibayeva:36LEmvuAEldhQ6Tr@cluster0.pg2hj.mongodb.net/"
 
 	clientOptions := options.Client().ApplyURI(uri)
 	client, err := mongo.NewClient(clientOptions)
