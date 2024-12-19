@@ -89,26 +89,24 @@ func (sc *StudentController) CreateStudent(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(student)
 }
 
-
 func (sc *StudentController) UpdateStudent(w http.ResponseWriter, r *http.Request) {
 	// Extract student ID from the URL
 	vars := mux.Vars(r)
 	studentID := vars["student_id"]
 
-	// Ensure studentID is provided
 	if studentID == "" {
 		http.Error(w, "student_id is required", http.StatusBadRequest)
 		return
 	}
 
-	// Convert studentID to MongoDB ObjectID
+	// Convert studentID to MongoDB ObjectID (if stored as ObjectID)
 	objectID, err := primitive.ObjectIDFromHex(studentID)
 	if err != nil {
 		http.Error(w, "Invalid student_id format", http.StatusBadRequest)
 		return
 	}
 
-	// Define the structure for input data
+	// Parse the input data
 	var input struct {
 		FirstName  string `json:"first_name"`
 		LastName   string `json:"last_name"`
@@ -117,76 +115,57 @@ func (sc *StudentController) UpdateStudent(w http.ResponseWriter, r *http.Reques
 		GradeLevel string `json:"grade_level"`
 	}
 
-	// Decode the request body into input structure
 	err = json.NewDecoder(r.Body).Decode(&input)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid JSON data", http.StatusBadRequest)
 		return
 	}
 
-	// Set up context with timeout for MongoDB operation
+	// Set up context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Access the student collection in MongoDB
+	// Access collections
 	studentCollection := sc.Client.Database("school").Collection("students")
 	classCollection := sc.Client.Database("school").Collection("classes")
 	gradeLevelCollection := sc.Client.Database("school").Collection("grade_levels")
 
-	// Update student fields in the student collection
-	updateStudent := bson.M{
-		"$set": bson.M{
-			"first_name": input.FirstName,
-			"last_name":  input.LastName,
-			"address":    input.Address,
-			"grade_level": input.GradeLevel,
-			"class_name":  input.ClassName,
-		},
-	}
+	// Update student fields in the `students` collection
+	updateStudent := bson.M{"$set": bson.M{
+		"first_name":  input.FirstName,
+		"last_name":   input.LastName,
+		"address":     input.Address,
+		"class_name":  input.ClassName,
+		"grade_level": input.GradeLevel,
+	}}
 
 	// Perform the update in the student collection
 	result, err := studentCollection.UpdateOne(ctx, bson.M{"_id": objectID}, updateStudent)
-	if err != nil {
-		http.Error(w, "Failed to update student", http.StatusInternalServerError)
+	if err != nil || result.MatchedCount == 0 {
+		http.Error(w, "Student not found or failed to update", http.StatusNotFound)
 		return
 	}
 
-	// Check if a document was actually modified
-	if result.MatchedCount == 0 {
-		http.Error(w, "Student not found", http.StatusNotFound)
-		return
-	}
-
-	// Update the grade level collection based on studentID
-	updateGradeLevel := bson.M{
-		"$set": bson.M{
-			"level": input.GradeLevel,
-		},
-	}
-
-	// Perform the update in the grade level collection
-	_, err = gradeLevelCollection.UpdateOne(ctx, bson.M{"student_id": objectID.Hex()}, updateGradeLevel)
-	if err != nil {
-		http.Error(w, "Failed to update grade level", http.StatusInternalServerError)
-		return
-	}
-
-	// Update the class collection based on studentID
-	updateClass := bson.M{
-		"$set": bson.M{
-			"class_name": input.ClassName,
-			"grade_level": input.GradeLevel,
-		},
-	}
-
-	// Perform the update in the class collection
-	_, err = classCollection.UpdateOne(ctx, bson.M{"student_id": objectID.Hex()}, updateClass)
+	// Update the `classes` collection
+	_, err = classCollection.UpdateOne(ctx, bson.M{"student_id": studentID}, bson.M{"$set": bson.M{
+		"class_name":  input.ClassName,
+		"grade_level": input.GradeLevel,
+	}})
 	if err != nil {
 		http.Error(w, "Failed to update class", http.StatusInternalServerError)
 		return
 	}
 
-	// Return success response
+	// Update the `grade_levels` collection
+	_, err = gradeLevelCollection.UpdateOne(ctx, bson.M{"student_id": studentID}, bson.M{"$set": bson.M{
+		"level": input.GradeLevel,
+	}})
+	if err != nil {
+		http.Error(w, "Failed to update grade level", http.StatusInternalServerError)
+		return
+	}
+
+	// Send success response
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Student updated successfully"})
 }
